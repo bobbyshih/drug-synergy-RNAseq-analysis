@@ -1,0 +1,278 @@
+---
+title: "MYLA_RomiAfaDimSyn_FIGURES"
+author: "Bobby Shih"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style type="text/css">
+.main-container {
+  max-width: 1800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+## MYLA Romidepsin + Afatinib Dimaleate Synergy RNA-seq
+
+R Markdown document to generate figure 3 for the Romidepsin + Afatinib Dimaleate Synergy paper.
+
+```{r DATA PROCESSING AND PREPARATION, echo = FALSE, include= FALSE}
+
+# Load packages
+library(DESeq2)
+library(dplyr)
+library(stringr)
+library(pheatmap)
+library(RColorBrewer)
+library(ggplot2)
+library(ggpubr)
+library(reshape2)
+library(circlize)
+library(ComplexUpset)
+
+
+# 1.1 Make circos plot depicting similar up- and down-regulated genes --------
+
+# Use the below functions if below variables are not already in environment
+drug_romi_vs_dmso <- read.csv("C:/Users/bobby/OneDrive - cumc.columbia.edu/Ferrando Lab/Synergism Project/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/drug_romi_vs_dmso.csv", row.names = 1)
+drug_combo_vs_dmso <- read.csv("C:/Users/bobby/OneDrive - cumc.columbia.edu/Ferrando Lab/Synergism Project/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/drug_combo_vs_dmso.csv", row.names = 1)
+drug_afa_vs_dmso <- read.csv("C:/Users/bobby/OneDrive - cumc.columbia.edu/Ferrando Lab/Synergism Project/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/drug_afa_vs_dmso.csv", row.names = 1)
+
+# Matrix of up- and down-regulated genes in each possible comparison to DMSO
+dysregulated.genes <- vector(mode = "list")
+dysregulated.genes[["Romi_Upregulated"]] <- subset(drug_romi_vs_dmso, log2FoldChange >= 1.2 & padj < 0.05) %>% row.names()
+dysregulated.genes[["Afa_Upregulated"]] <- subset(drug_afa_vs_dmso, log2FoldChange >= 1.2 & padj < 0.05) %>% row.names()
+dysregulated.genes[["RA_Upregulated"]] <- subset(drug_combo_vs_dmso, log2FoldChange >= 1.2 & padj < 0.05) %>% row.names()
+dysregulated.genes[["Romi_Downregulated"]] <- subset(drug_romi_vs_dmso, log2FoldChange <= -1.2 & padj < 0.05) %>% row.names()
+dysregulated.genes[["Afa_Downregulated"]] <- subset(drug_afa_vs_dmso, log2FoldChange <= -1.2 & padj < 0.05) %>% row.names()
+dysregulated.genes[["RA_Downregulated"]] <- subset(drug_combo_vs_dmso, log2FoldChange <= -1.2 & padj < 0.05) %>% row.names()
+
+# Generate matrix for dysregulated genes unique to one condition
+unique.genes <- vector(mode = "list")
+unique.genes.temp <- c(dysregulated.genes[["Romi_Upregulated"]], dysregulated.genes[["Afa_Upregulated"]], dysregulated.genes[["RA_Upregulated"]]) %>% table() %>% as.data.frame() %>% subset(Freq == 1)
+unique.genes[["upregulated"]] <- unique.genes.temp$. %>% as.character()
+
+unique.genes.temp <- c(dysregulated.genes[["Romi_Downregulated"]], dysregulated.genes[["Afa_Downregulated"]], dysregulated.genes[["RA_Downregulated"]]) %>% table() %>% as.data.frame() %>% subset(Freq == 1)
+unique.genes[["downregulated"]] <- unique.genes.temp$. %>% as.character()
+rm(unique.genes.temp)
+
+# Generate matrix for upregulated circos plot
+# Note that the numbers indicate the size of the node between two groups
+# note that the color of the ribbons in the circos plot are determined by the row of the circos matrix
+upregulated.circos.mat <- matrix(0, nrow = 3, ncol = 5)
+rownames(upregulated.circos.mat) <- c("Romi", "Afa", "RA")
+colnames(upregulated.circos.mat) <- c("R + A", "R + RA", "A + RA", "Unique", "Common")
+
+upregulated.common <- intersect(dysregulated.genes[["Romi_Upregulated"]], dysregulated.genes[["Afa_Upregulated"]]) %>% intersect(dysregulated.genes[["RA_Upregulated"]])
+upregulated.circos.mat[,"Common"] <- intersect(dysregulated.genes[["Romi_Upregulated"]], dysregulated.genes[["Afa_Upregulated"]]) %>% intersect(dysregulated.genes[["RA_Upregulated"]]) %>% length()
+
+temp <- intersect(dysregulated.genes[["Romi_Upregulated"]], dysregulated.genes[["Afa_Upregulated"]]) %in% upregulated.common
+upregulated.circos.mat["Romi", "R + A"] <- sum(!temp)
+temp <- intersect(dysregulated.genes[["Romi_Upregulated"]], dysregulated.genes[["RA_Upregulated"]]) %in% upregulated.common
+upregulated.circos.mat["Romi","R + RA"] <- sum(!temp)
+upregulated.circos.mat["Romi","Unique"] <- intersect(dysregulated.genes[["Romi_Upregulated"]], unique.genes[["upregulated"]]) %>% length()
+
+upregulated.circos.mat["Afa","R + A"] <- upregulated.circos.mat["Romi","R + A"]
+temp <- intersect(dysregulated.genes[["Afa_Upregulated"]], dysregulated.genes[["RA_Upregulated"]]) %in% upregulated.common
+upregulated.circos.mat["Afa","A + RA"] <- sum(!temp)
+upregulated.circos.mat["Afa", "Unique"] <- intersect(dysregulated.genes[["Afa_Upregulated"]], unique.genes[["upregulated"]]) %>% length()
+
+upregulated.circos.mat["RA","R + RA"] <- upregulated.circos.mat["Romi","R + RA"]
+upregulated.circos.mat["RA","A + RA"] <- upregulated.circos.mat["Afa","A + RA"]
+upregulated.circos.mat["RA","Unique"] <- intersect(dysregulated.genes[["RA_Upregulated"]], unique.genes[["upregulated"]]) %>% length()
+
+rm(temp)
+
+# Generate matrix for downregulated circos plot
+downregulated.circos.mat <- matrix(0, nrow = 3, ncol = 5)
+rownames(downregulated.circos.mat) <- c("Romi", "Afa", "RA")
+colnames(downregulated.circos.mat) <- c("R + A", "R + RA", "A + RA", "Unique", "Common")
+
+downregulated.common <- intersect(dysregulated.genes[["Romi_Downregulated"]], dysregulated.genes[["Afa_Downregulated"]]) %>% intersect(dysregulated.genes[["RA_Downregulated"]])
+downregulated.circos.mat[,"Common"] <- intersect(dysregulated.genes[["Romi_Downregulated"]], dysregulated.genes[["Afa_Downregulated"]]) %>% intersect(dysregulated.genes[["RA_Downregulated"]]) %>% length()
+
+temp <- intersect(dysregulated.genes[["Romi_Downregulated"]], dysregulated.genes[["Afa_Downregulated"]]) %in% downregulated.common
+downregulated.circos.mat["Romi", "R + A"] <- sum(!temp)
+temp <- intersect(dysregulated.genes[["Romi_Downregulated"]], dysregulated.genes[["RA_Downregulated"]]) %in% downregulated.common
+downregulated.circos.mat["Romi","R + RA"] <- sum(!temp)
+downregulated.circos.mat["Romi","Unique"] <- intersect(dysregulated.genes[["Romi_Downregulated"]], unique.genes[["downregulated"]]) %>% length()
+
+downregulated.circos.mat["Afa","R + A"] <- downregulated.circos.mat["Romi","R + A"]
+temp <- intersect(dysregulated.genes[["Afa_Downregulated"]], dysregulated.genes[["RA_Downregulated"]]) %in% downregulated.common
+downregulated.circos.mat["Afa","A + RA"] <- sum(!temp)
+downregulated.circos.mat["Afa", "Unique"] <- intersect(dysregulated.genes[["Afa_Downregulated"]], unique.genes[["downregulated"]]) %>% length()
+
+downregulated.circos.mat["RA","R + RA"] <- downregulated.circos.mat["Romi","R + RA"]
+downregulated.circos.mat["RA","A + RA"] <- downregulated.circos.mat["Afa","A + RA"]
+downregulated.circos.mat["RA","Unique"] <- intersect(dysregulated.genes[["RA_Downregulated"]], unique.genes[["downregulated"]]) %>% length()
+
+# Make necessary group variables for plotting
+nm = unique(unlist(dimnames(upregulated.circos.mat)))
+group = structure(c(rep("A", 3), rep("B", 5)), names = nm)
+group
+
+# grid.col is used to assign colors to different groups, If you want two groups to have the same color, assign it the same number in grid.col
+# Each number corresponds to a different color, so changing the number and order of numbers can get different plots
+grid.col = structure(2:9,
+                     names = nm)
+#
+# 1.2 ComplexUpset intersection size plot ---------------------------------
+
+# Upset plot for upregulated genes
+all.Up.genes <- c(dysregulated.genes[[1]],dysregulated.genes[[2]],dysregulated.genes[[3]])
+all.Up.genes <- all.Up.genes[!duplicated(all.Up.genes)]
+
+upregulated.intersection <- matrix(nrow = length(all.Up.genes), ncol = 3)
+rownames(upregulated.intersection) <- all.Up.genes
+colnames(upregulated.intersection) <- c("Romi", "Afa Dim", "Combo")
+
+for (i in 1:3){
+  for (j in 1:length(all.Up.genes)){
+    upregulated.intersection[j,i] <- sum(dysregulated.genes[[i]] == all.Up.genes[j])
+  }
+}
+
+# Turn 1 to TRUE and 0 to FALSE
+upregulated.intersection <- upregulated.intersection == 1
+upregulated.intersection <- as.data.frame(upregulated.intersection)
+
+# Upset plot for downregulated genes
+all.Down.genes <- c(dysregulated.genes[[4]],dysregulated.genes[[5]],dysregulated.genes[[6]])
+all.Down.genes <- all.Down.genes[!duplicated(all.Down.genes)]
+downregulated.intersection <- matrix(nrow = length(all.Down.genes), ncol = 3)
+rownames(downregulated.intersection) <- all.Down.genes
+colnames(downregulated.intersection) <- c("Romi", "Afa Dim", "Combo")
+
+for (i in 1:3){
+  for (j in 1:length(all.Down.genes)){
+    downregulated.intersection[j,i] <- sum(dysregulated.genes[[i+3]] == all.Down.genes[j])
+  }
+}
+
+# Turn 1 to TRUE and 0 to FALSE
+downregulated.intersection <- downregulated.intersection == 1
+downregulated.intersection <- as.data.frame(downregulated.intersection)
+#
+
+```
+
+FIG 3A : Significantly up-regulated gene circos plots + intersection plot
+
+```{r FIG3A_TOP, fig.align = 'center', fig.height = 9}
+par(cex = 1.5, mar = c(0, 0, 0, 0))
+chordDiagram(upregulated.circos.mat, group = group, grid.col = grid.col, transparency = 0.3, annotationTrack = "grid",
+             preAllocateTracks = list(track.height = max(strwidth(unlist(dimnames(upregulated.circos.mat))))))
+
+# Adjust label direction according to width of sectors
+circos.track(track.index = 1, panel.fun = function(x, y) {
+    xlim = get.cell.meta.data("xlim")
+    xplot = get.cell.meta.data("xplot")
+    ylim = get.cell.meta.data("ylim")
+    sector.name = get.cell.meta.data("sector.index")
+
+    if(abs(xplot[2] - xplot[1]) < 10) {
+        circos.text(mean(xlim), ylim[1], sector.name, facing = "clockwise",
+            niceFacing = TRUE, adj = c(0, 0.5), col = "black")
+    } else {
+        circos.text(mean(xlim), ylim[1], sector.name, facing = "inside", 
+            niceFacing = TRUE, adj = c(0.5, 0), col= "black")
+    }
+}, bg.border = NA)
+circos.clear()
+```
+```{r FIG3A_BOT, fig.align = 'center', fig.width = 9}
+upset(upregulated.intersection, colnames(upregulated.intersection),
+      base_annotations = list('Intersection size' = intersection_size(counts = TRUE, text = aes(size = 8))),
+        themes=upset_modify_themes(
+          list(
+            'intersections_matrix'= theme(text=element_text(size=25)),
+            'overall_sizes'= theme(axis.text.x=element_text(angle=90, size = 15),
+                                   text = element_text(size = 20)),
+            "Intersection size" = theme(text = element_text(size = 20),
+                                        axis.text.y = element_text(size = 20))
+              )
+    )
+)
+
+```
+
+FIG 3B : Significantly down-regulated gene circos plots + intersection plot
+
+```{r FIG3B_TOP, fig.align = 'center', fig.height = 9}
+par(cex = 1.5, mar = c(0, 0, 0, 0))
+chordDiagram(downregulated.circos.mat, group = group, grid.col = grid.col, transparency = 0.3, annotationTrack = "grid",
+             preAllocateTracks = list(track.height = max(strwidth(unlist(dimnames(downregulated.circos.mat))))))
+
+# Adjust label direction according to width of sectors
+circos.track(track.index = 1, panel.fun = function(x, y) {
+    xlim = get.cell.meta.data("xlim")
+    xplot = get.cell.meta.data("xplot")
+    ylim = get.cell.meta.data("ylim")
+    sector.name = get.cell.meta.data("sector.index")
+
+    if(abs(xplot[2] - xplot[1]) < 10) {
+        circos.text(mean(xlim), ylim[1], sector.name, facing = "clockwise",
+            niceFacing = TRUE, adj = c(0, 0.5), col = "black")
+    } else {
+        circos.text(mean(xlim), ylim[1], sector.name, facing = "inside", 
+            niceFacing = TRUE, adj = c(0.5, 0), col= "black")
+    }
+}, bg.border = NA)
+circos.clear()
+```
+```{r FIG3B_BOT, fig.align = 'center', fig.width = 9}
+upset(downregulated.intersection, colnames(downregulated.intersection),
+      base_annotations = list('Intersection size' = intersection_size(counts = TRUE, text = aes(size = 8))),
+        themes=upset_modify_themes(
+          list(
+            'intersections_matrix'= theme(text=element_text(size=25)),
+            'overall_sizes'= theme(axis.text.x=element_text(angle=90, size = 15),
+                                   text = element_text(size = 20)),
+            "Intersection size" = theme(text = element_text(size = 20),
+                                        axis.text.y = element_text(size = 20))
+              )
+    )
+)
+```
+
+FIG 3C : Heatmap of all significantly up- and down-regulated genes when comparing DMSO vs. Combination
+
+```{r FIG3C Data, include = FALSE}
+
+dds_drug <- readRDS("C:/Users/bobby/OneDrive - cumc.columbia.edu/Ferrando Lab/Synergism Project/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/MYLA_RomiAfaSyn_DESEQ2_dds_drug.rds")
+
+combo_vs_dmso <- results(dds_drug, name = "drug_combo_vs_dmso")
+
+all_pairwise_siggenes <- combo_vs_dmso %>% subset(padj < 0.05 & abs(log2FoldChange) > 1.2) %>% rownames()
+
+dds.norm.counts <- read.csv("C:/Users/bobby/OneDrive - cumc.columbia.edu/Ferrando Lab/Synergism Project/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/DESEQ2_NormalizedCounts.csv", row.names = 1)
+
+dds.norm.counts <- dds.norm.counts[, c('MYLA.DMSO.1', 'MYLA.DMSO.2', 'MYLA.DMSO.3', 'MYLA.ROMI.1', 'MYLA.ROMI.2', 'MYLA.ROMI.3', 'MYLA.AFADIM.1', 'MYLA.AFADIM.2', 'MYLA.AFADIM.3', 'MYLA.RAfD.COMBO.1', 'MYLA.RAfD.COMBO.2', 'MYLA.RAfD.COMBO.3')]
+colnames(dds.norm.counts) <- c("DMSO-1", "DMSO-2", "DMSO-3", "ROMI-1", "ROMI-2", "ROMI-3", "AFADIM-1", "AFADIM-2", "AFADIM-3", "COMBO-1", "COMBO-2", "COMBO-3")
+
+```
+```{r FIG3C, fig.align = 'center', fig.width = 9, fig.height = 12}
+
+annotation_col <- structure(list(category = structure(c(1L, 1L, 1L, 2L, 2L, 2L, 3L, 3L, 3L, 4L, 4L ,4L), .Label = c("DMSO", "Romi", "Afa Dim", "Combo"), class = "factor")), class = "data.frame", row.names = c("DMSO-1","DMSO-2","DMSO-3","ROMI-1","ROMI-2","ROMI-3","AFADIM-1","AFADIM-2","AFADIM-3","COMBO-1","COMBO-2","COMBO-3"))
+
+heatmap <- pheatmap(dds.norm.counts[match(all_pairwise_siggenes, row.names(dds.norm.counts)),],
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(100),
+         show_rownames = FALSE,
+         show_colnames = FALSE,
+         treeheight_row = 75,
+         fontsize_col = 15,
+         fontsize_row = 6,
+         annotation_col = annotation_col,
+         main = "All Pairwise Sig Genes",
+         angle_col = 45)
+
+
+```
+
