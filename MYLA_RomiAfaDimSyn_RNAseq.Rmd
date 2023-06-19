@@ -1,0 +1,290 @@
+---
+title: "MYLA Romidepsin + Afatinib Dimaleate Synergy RNA-seq analysis"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+RNA-seq analysis of MYLA CD4 cells treated with Romidepsin, Afatinib Dimaleate, or the Combination
+
+For more details on how these samples were prepared go to OneNote > Drug Screen > RNA-seq + Annexin-V + Cell Cycle Analysis Romi + Afa Dim Combo > EXP 3 - MYLA
+
+For more details on the alignment and count matrix generation, see /home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn and open runSTAR.sh and runfeatureCounts.sh
+
+```{r LOAD PACKAGES, eval = FALSE}
+library(BiocManager)
+library(DESeq2)
+library(dplyr)
+library(stringr)
+library(pheatmap)
+library(openxlsx)
+library(RColorBrewer)
+library(ggplot2)
+library(ggpubr)
+library(reshape2)
+library(umap)
+library(M3C)
+library(circlize)
+library(clusterProfiler)
+```
+
+```{r IMPORT COUNT AND COLUMN DATA, eval = FALSE}
+#Import count matrix generated from featureCounts
+counts <- read.table('/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/STAR/MYLA_RomiAfaDimSyn_countmatrix2.txt')
+
+# Generate a count matrix removing all variant information from the ensembl gene ID
+colnames(counts) <- counts[1,] # Make first row the column name
+counts <- counts[-1,] # Remove the first row
+
+# Remove unnecessary columns
+counts$Chr <- NULL
+counts$Start <- NULL
+counts$End <- NULL
+counts$Length <- NULL
+counts$Strand <- NULL
+
+counts <- counts[-which(duplicated(counts[,1])),] # Remove duplicated gene names
+rownames(counts) <- counts[,1]
+counts[,1] <- NULL
+
+t_scale_counts <- t(counts) %>% as.data.frame() # Transpose count matrix
+t_scale_counts <- as.data.frame(sapply(t_scale_counts, as.numeric)) # Convert transposed matrix to numeric for scale()
+rownames(t_scale_counts) <- colnames(counts) # Unfortunately above code will reset rownames, revert to sample name
+scale_counts <- t(scale(t_scale_counts))
+scale_counts <- scale_counts[rowSums(is.na(scale_counts))==0,] # Remove NAs
+
+scale_counts <- scale_counts[, c('DMSO-1', 'DMSO-2', 'DMSO-3', 'ROMI-1', 'ROMI-2', 'ROMI-3', 'AFADIM-1', 'AFADIM-2', 'AFADIM-3', 'COMBO-1', 'COMBO-2', 'COMBO-3')]
+colnames(scale_counts) <- c("DMSO-1", "DMSO-2", "DMSO-3", "ROMI-1", "ROMI-2", "ROMI-3", "AFADIM-1", "AFADIM-2", "AFADIM-3", "COMBO-1", "COMBO-2", "COMBO-3")
+write.csv(scale_counts, file = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/scale_counts.csv")
+```
+
+```{r RUN DESEQ2, eval = FALSE}
+DESEQ_counts <- counts
+DESEQ_counts <- DESEQ_counts[!duplicated(DESEQ_counts$Geneid),]
+rownames(DESEQ_counts) <- DESEQ_counts[,1]
+DESEQ_counts[,1] <- NULL
+DESEQ_counts <- data.matrix(DESEQ_counts)
+
+#coldata is required information regrading each sample for analysis design
+col.data <- read.csv("/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/col.data.csv")
+rownames(col.data) <- col.data[,1]
+col.data[,1] <- NULL
+col.data <- as.matrix(col.data)
+
+# Run DESeq2 comparing each drug to dmso
+dds_drug <- DESeqDataSetFromMatrix(countData = DESEQ_counts,
+                              colData = col.data,
+                              design = ~ drug)
+
+# Look at a histogram of total counts to determine cutoff
+dds_drug_count <- counts(dds_drug) %>% as.data.frame()
+dds_drug_count$Gene <- rownames(dds_drug_count)
+dds_drug_count <- data.frame(reshape::melt(dds_drug_count, id.vars = "Gene")) # Reshape the data for ggplot2
+
+# VlnPlot of the counts by sample
+ggplot(dds_drug_count, aes(x = variable, y = value)) + 
+  geom_violin(aes(fill = variable)) +
+  scale_y_continuous(trans='log10') +
+  theme_light() + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), axis.title.x = element_blank(), legend.position = "none", axis.text = element_text(size = 11), axis.title.y = element_text(size = 14)) +
+  ylab("Counts")
+  
+# Based on VlnPlots a cutoff of 10 is fine
+
+remove <- apply(counts(dds_drug), 1, function(x) any(x <= 10)) #Remove all genes that have less than 10 counts in any condition as a pre-filtering step
+dds_drug <- dds_drug[!remove,] # 13315 / 59048 genes kept
+dds_drug$drug <- relevel(dds_drug$drug, ref = "dmso") # Set dmso as the reference 
+dds_drug <- DESeq(dds_drug) # Run DESEQ2
+
+saveRDS(dds_drug, "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/dds_drug.rds")
+# dds_drug <- readRDS("/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/dds_drug.rds")
+
+drug_romi_vs_dmso <- results(dds_drug, name = "drug_romi_vs_dmso")
+drug_afa_vs_dmso <- results(dds_drug, name = "drug_afa_vs_dmso")
+drug_combo_vs_dmso <- results(dds_drug, name = "drug_combo_vs_dmso")
+
+dds_drug$drug <- relevel(dds_drug$drug, ref = "afa")
+dds_drug <- DESeq(dds_drug)
+drug_romi_vs_afa <- results(dds_drug, name = "drug_romi_vs_afa")
+drug_combo_vs_afa <- results(dds_drug, name = "drug_combo_vs_afa")
+
+dds_drug$drug <- relevel(dds_drug$drug, ref = "romi")
+dds_drug <- DESeq(dds_drug)
+drug_combo_vs_romi <- results(dds_drug, name = "drug_combo_vs_romi")
+drug_afa_vs_romi <- results(dds_drug, name = "drug_afa_vs_romi")
+
+write.csv(drug_romi_vs_dmso, file = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/drug_romi_vs_dmso.csv")
+write.csv(drug_afa_vs_dmso, file = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/drug_afa_vs_dmso.csv")
+write.csv(drug_combo_vs_dmso, file = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/drug_combo_vs_dmso.csv")
+write.csv(drug_romi_vs_afa, file = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/drug_romi_vs_afa.csv")
+write.csv(drug_combo_vs_afa, file = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/drug_combo_vs_afa.csv")
+write.csv(drug_combo_vs_romi, file = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/drug_combo_vs_romi.csv")
+
+#Export DESEQ2 normalized counts
+dds_drug <- estimateSizeFactors(dds_drug)
+counts(dds_drug, normalized = T) %>% write.csv(, file = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/DESEQ2_NormalizedCounts.csv")
+```
+
+Generate heatmap displaying top 25 up- and down-regulated genes for each possible pairwise comparison
+Displays z-scores for each gene, but select the genes based on log2FC calculated using DESEQ2
+
+```{r DIFFERENTIAL EXPRESSION HEATMAP, eval = FALSE}
+all_pairwise_top_genes <- as.character()
+colnames(all_pairwise_top_genes[,1]) <- 'X'
+
+# Generate list of top 25 up- and down-regulated genes from each pairwise comparison (to DMSO)
+all_pairwise_top_genes <- drug_combo_vs_dmso %>% as.data.frame() %>% subset(padj < 0.05) %>% top_n(n = 25, wt = log2FoldChange) %>% rownames() %>% c(all_pairwise_top_genes)
+all_pairwise_top_genes <- drug_combo_vs_dmso %>% as.data.frame() %>% subset(padj < 0.05) %>% top_n(n = -25, wt = log2FoldChange) %>% rownames() %>% c(all_pairwise_top_genes)
+
+all_pairwise_top_genes <- drug_romi_vs_dmso %>% as.data.frame() %>% subset(padj < 0.05) %>% top_n(n = 25, wt = log2FoldChange) %>% rownames() %>% c(all_pairwise_top_genes)
+all_pairwise_top_genes <- drug_romi_vs_dmso %>% as.data.frame() %>% subset(padj < 0.05) %>% top_n(n = -25, wt = log2FoldChange) %>% rownames() %>% c(all_pairwise_top_genes)
+
+all_pairwise_top_genes <- drug_afa_vs_dmso %>% as.data.frame() %>% subset(padj < 0.05) %>% top_n(n = 25, wt = log2FoldChange) %>% rownames() %>% c(all_pairwise_top_genes)
+all_pairwise_top_genes <- drug_afa_vs_dmso %>% as.data.frame() %>% subset(padj < 0.05) %>% top_n(n = -25, wt = log2FoldChange) %>% rownames() %>% c(all_pairwise_top_genes)
+
+all_pairwise_top_genes <- all_pairwise_top_genes[!(is.na(all_pairwise_top_genes))] # Remove NAs
+all_pairwise_top_genes <- all_pairwise_top_genes[!(duplicated(all_pairwise_top_genes))] # Remove duplicated entries
+
+# Generate matrix of scaled counts with genes selected based on log2FC from every possible pairwise comparison
+all_pairwise_scaledcounts <- scale_counts[match(all_pairwise_top_genes, rownames(scale_counts)),] %>% as.data.frame()
+
+# Re-order the columns
+all_pairwise_scaledcounts <- all_pairwise_scaledcounts[, c('DMSO-1', 'DMSO-2', 'DMSO-3', 'ROMI-1', 'ROMI-2', 'ROMI-3', 'AFADIM-1', 'AFADIM-2', 'AFADIM-3', 'COMBO-1', 'COMBO-2', 'COMBO-3')]
+
+# Generate heatmap
+pheatmap(all_pairwise_scaledcounts,
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         color = colorRampPalette(rev(brewer.pal(n = 7, name = "RdYlBu")))(100),
+         show_rownames = FALSE,
+         fontsize_col = 15,
+         fontsize_row = 6,
+         main = "MYLA",
+         angle_col = 45)
+```
+
+```{r}
+knitr::include_graphics("/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/heatmap.png")
+```
+
+Calculate sample euclidian distance to understand variance in the data.
+
+```{r SAMPLE EUCLIDIAN DISTANCE, eval = FALSE}
+# Transform counts using variance stabilizing transformation (VST) and regularized log transformation (RLT)
+vsd <- vst(dds, blind=FALSE, fitType = 'local')
+rld <- rlog(dds, blind=FALSE)
+head(assay(vsd), 3)
+
+# PCA plot to visualize variability in transcriptome as a result of treatment
+plotPCA(vsd, intgroup = c("cell", "drug"), ntop = 500, returnData = FALSE)
+
+# Heatmap of sample to sample distance
+sampleDists <- dist(t(assay(vsd)))
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix(sampleDists)
+#rownames(sampleDistMatrix) <- paste(vsd$cell, vsd$drug, sep="-")
+#colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette(rev(brewer.pal(9, "RdBu")))(255)
+library(pheatmap)
+pheatmap(sampleDistMatrix,
+         cluster_cols = TRUE,
+         show_colnames = FALSE,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+```
+
+Below was a pilot analysis applying UMAP dimensionality reduction to understand which genes specifically mediated the synergistic effect of Romidepsin + Afatinib Dimaleate combination treatment.
+
+First, we generate a data frame that contains log2FC values for significantly dysregulated genes (log2fc < 1.2 & pval < 0.05) for DMSO vs. Romi, DMSO vs. Afa Dim, Romi vs. Combo, and Afa Dim vs. Combo. Genes are not required to be significantly dysregulated in every condition. I then perform clustering and UMAP dimensionality reduction
+
+If there was, for instance, a set of genes that are not significantly perturbed between DMSO and Romi or DMSO and Afa Dim but was significantly dysregulated when comparing Romi vs. Combo and/or Afa Dim vs. Combo, this set of genes would be considered a combination specific effect of treatment. 
+
+One possible issue with conventional analysis of drug treatment when analyzing multiple drug treatments is that directly comparing DMSO and combination may uncover mechanisms of treatment that are caused by one of the single agent treatments alone, and is thus not considered combination specific. These mechanisms may be of interest, however the question being asked here is "which genes or sets of genes are specifically perturbed upon combination treatment not observed in either single agent treatment alone?"
+
+In performing clustering and UMAP dimensionality reduction, we hope to provide an unbiased means of identifying combination specific mechanisms.
+
+```{r UMAP, eval = FALSE}
+UMAP_siggene_list <- drug_afa_vs_dmso %>% subset(abs(log2FoldChange) > 1.2 & padj < 0.05) %>% rownames()
+UMAP_siggene_list <- drug_romi_vs_dmso %>% subset(abs(log2FoldChange) > 1.2 & padj < 0.05) %>% rownames() %>% c(UMAP_siggene_list)
+UMAP_siggene_list <- drug_combo_vs_afa %>% subset(abs(log2FoldChange) > 1.2 & padj < 0.05) %>% rownames() %>% c(UMAP_siggene_list)
+UMAP_siggene_list <- drug_afa_vs_romi %>% subset(abs(log2FoldChange) > 1.2 & padj < 0.05) %>% rownames() %>% c(UMAP_siggene_list)
+
+UMAP_siggene_list <- UMAP_siggene_list[!duplicated(UMAP_siggene_list)] # Remove duplicated entries
+
+UMAP_siggene_log2FC <- data.frame(row.names = UMAP_siggene_list)
+UMAP_siggene_log2FC$afa_vs_dmso <- drug_afa_vs_dmso$log2FoldChange[match(rownames(UMAP_siggene_log2FC), rownames(drug_afa_vs_dmso))]
+UMAP_siggene_log2FC$romi_vs_dmso <- drug_romi_vs_dmso$log2FoldChange[match(rownames(UMAP_siggene_log2FC), rownames(drug_romi_vs_dmso))]
+UMAP_siggene_log2FC$combo_vs_afa <- drug_combo_vs_afa$log2FoldChange[match(rownames(UMAP_siggene_log2FC), rownames(drug_combo_vs_afa))]
+UMAP_siggene_log2FC$combo_vs_romi <- drug_combo_vs_romi$log2FoldChange[match(rownames(UMAP_siggene_log2FC), rownames(drug_combo_vs_romi))]
+UMAP_siggene_log2FC <- t(UMAP_siggene_log2FC)
+UMAP_siggene_log2FC <- data.frame(UMAP_siggene_log2FC)
+
+write.csv(UMAP_siggene_log2FC, file = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/UMAP/UMAP_siggene_log2FC.csv")
+
+umap <- umap(UMAP_siggene_log2FC, dotsize = 1) # Uses the M3C package
+saveRDS(umap, "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/UMAP/umap.rds")
+```
+
+Run Monte Carlo Reference-based consensus clustering using the M3C package
+
+```{r MONTE CARLO CONSENSUS CLUSTERING, eval = FALSE}
+clusters <- M3C(UMAP_siggene_log2FC, cores = 32, method = 1) # Samples as columns (genes), rows as feature (DESEQ). Note that this may run into an error "undefined columns selected". This can be fixed by running the input data through data.frame() 
+saveRDS(clusters, "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/UMAP/clusters.rds")
+
+```
+
+Save plots from clustering:
+
+```{r M3C PLOTS, eval = FALSE}
+# Save plots
+png(filename = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/UMAP/CDF.png", width = 800, height = 400)
+print(clusters$plots[[1]])
+dev.off()
+
+png(filename = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/UMAP/entropy.png", width = 800, height = 400)
+print(clusters$plots[[2]])
+dev.off()
+
+png(filename = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/UMAP/pval.png", width = 800, height = 400)
+print(clusters$plots[[3]])
+dev.off()
+
+png(filename = "/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/UMAP/RCSI.png", width = 800, height = 400)
+print(clusters$plots[[4]])
+dev.off()
+```
+
+```{r}
+knitr::include_graphics("/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/UMAP/RCSI.png")
+```
+Note that M3C will calculate various resolutions. Look at the graph using clusters$plots and access different assignments by using clusters$realdataresults[[n]]$assignments where n is the resolution desired
+
+Based on RCSI plot a resolution of k = 3 is optimal
+
+```{r UMAP CLUSTERED, eval = FALSE}
+
+data <- clusters$realdataresults[[3]]$ordered_data
+annon <- clusters$realdataresults[[3]]$ordered_annotation
+ccmatrix <- clusters$realdataresults[[3]]$consensus_matrix
+
+assignments <- clusters$realdataresults[[3]]$assignments %>% as.data.frame()
+
+umap_data <- umap$data
+umap_data$assignment <- assignments[match(rownames(assignments), rownames(umap_data)),1]
+
+# the below uses the output of the umap package
+ggplot(umap_data, aes(x = umap_data[,1], y = umap_data[,2], color = as.factor(umap_data[,3]))) +
+  geom_point() +
+  theme_bw() +
+  labs(x = "UMAP_1", y = "UMAP_2", color = "Cluster Assignment") +
+  guides(colour = guide_legend(override.aes = list(size=5))) +
+  theme(axis.text = element_text(size = 15),
+        axis.title = element_text(size = 15),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 15))
+```
+```{r}
+knitr::include_graphics("/home/bobby/RStudio/RNA-seq/20220301_MYLA_RomiAfaSyn/DESEQ2/UMAP/UMAP_clustered.png")
+```
+
