@@ -1,5 +1,5 @@
 # CTCL romidepsin + afatinib dimaleate combination synergism RNA-seq analysis
-RNA-seq data analysis of MYLA cells treated with DMSO, Romidepsin, Afatinib Dimaleate or the combination to understand molecular mechanisms underlying synergy between romidepsin and afatinib dimaleate
+RNA-seq data analysis performed in R. RNA-seq data from MYLA cells treated with DMSO, romidepsin, afatinib dimaleate or the combination to understand molecular mechanisms underlying synergy between romidepsin and afatinib dimaleate.
 
 A basic analysis can be found in MYLA_RomiAfaDimSyn_RNAseq.Rmd and the associated .html file. This script will scale expression of every gene and export the results of DESEQ2 (https://bioconductor.org/packages/release/bioc/html/DESeq2.html) across every pairwise comparison to a .csv file for further analysis. In addition, I attempt to utilize Monte Carlo Reference-based Consensus Clustering (https://www.bioconductor.org/packages/release/bioc/html/M3C.html) to identify genes that are specifically dysregulated upon treatment with the combination of romidepsin and afatinib Dimaleate that are not observed during single agent treatment.
 
