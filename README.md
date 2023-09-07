@@ -7,7 +7,7 @@ Under CompleteUpset_Figures/ scripts can be found to generate circos plots compa
 
 To view the R Markdown notebook in html, please use the below link:
 
-https://htmlpreview.github.io/?https://github.com/bobbyshih/CTCL-drug-synergy-RNAseq-analysis/blob/main/MYLA_RomiAfaDimSyn_RNAseq.nb.html
+https://htmlpreview.github.io/?https://github.com/bobbyshih/drug-synergy-RNAseq-analysis/blob/main/DrugSynergy_RNAseq.html
 
 To view the R Markdown notebook that generated the ComplexUpset circos and intersection plots, please use the below link:
 
