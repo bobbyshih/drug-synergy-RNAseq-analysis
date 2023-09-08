@@ -14,6 +14,6 @@ To view the R Markdown notebook that generated the ComplexUpset circos and inter
 
 https://htmlpreview.github.io/?https://github.com/bobbyshih/drug-synergy-RNAseq-analysis/blob/main/CompletUpset_Figures/DrugSynergy_RNAseq_FIGURES.html
 
-This drug combination was identified using a high-throughput synergy screening strategy, summarized in the figure below (made using BioRender[https://www.biorender.com/]):
+This drug combination was identified using a high-throughput synergy screening strategy, summarized in the figure below (made using [BioRender](https://www.biorender.com/)):
 
 ![DrugSynergyHTS](https://github.com/bobbyshih/drug-synergy-RNAseq-analysis/assets/37740736/e53ace9f-b525-476f-8703-86bdc11d80c2)
