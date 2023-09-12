@@ -8,11 +8,11 @@ Under CompleteUpset_Figures/ scripts can be found to generate circos plots compa
 
 To view the R Markdown notebook in html, please use the below link:
 
-https://htmlpreview.github.io/?https://github.com/bobbyshih/drug-synergy-RNAseq-analysis/blob/main/DrugSynergy_RNAseq.html
+https://bobbyshih.net/DrugSynergy_RNAseq.html
 
 To view the R Markdown notebook that generated the ComplexUpset circos and intersection plots, please use the below link:
 
-https://htmlpreview.github.io/?https://github.com/bobbyshih/drug-synergy-RNAseq-analysis/blob/main/CompletUpset_Figures/DrugSynergy_RNAseq_FIGURES.html
+https://bobbyshih.net/DrugSynergy_RNAseq_ComplexUpset.html
 
 This drug combination was identified using a high-throughput synergy screening strategy, summarized in the figure below (made using [BioRender](https://www.biorender.com/)):
 
